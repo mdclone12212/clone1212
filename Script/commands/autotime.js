@@ -86,12 +86,12 @@ module.exports.onLoad = ({ api }) => {
             const extra = extraLines[Math.floor(Math.random() * extraLines.length)];
 
             const finalMessage =
-`━━━━━━━━━━━━━━━━━━━━━
+`╔═❖═❖═❖═❖═❖═❖═❖═❖═╗
 🕒 এখন সময়: ${formattedTime}
 ${message}
 
 ${extra}
-━━━━━━━━━━━━━━━━━━━━━`;
+╚═❖═❖═❖═❖═❖═❖═❖═❖═╝`;
 
             global.data.allThreadID.forEach(threadID => {
                 api.sendMessage(finalMessage, threadID, (error) => {
