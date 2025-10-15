@@ -124,7 +124,7 @@ module.exports.run = async function({ api, event, Users }) {
 আমি এখন এই গ্রুপে একটিভ আছি 😎  
 
 🛠️ লিখুন:  help  — সব কমান্ড দেখতে  
-👑 Bot Owner : Saiful Islam 💻
+👑 Bot Owner : 𝐌𝐝 𝐇𝐚𝐦𝐢𝐦 💻
 ━━━━━━━━━━━━━━━━━━`,
         mentions: [{ tag: adderName, id: adderID }],
         attachment: fs.createReadStream(outPath)
