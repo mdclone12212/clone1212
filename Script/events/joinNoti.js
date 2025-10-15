@@ -98,7 +98,7 @@ module.exports.run = async function({ api, event, Users }) {
 
     ctx.font = "bold 22px Arial";
     ctx.fillStyle = "#FF69B4";
-    ctx.fillText(`Bot Owner: Saiful Islam 💻`, canvas.width / 2, canvas.height - 30);
+    ctx.fillText(`Bot Owner: 𝐌𝐝 𝐇𝐚𝐦𝐢𝐦 💻`, canvas.width / 2, canvas.height - 30);
 
     const finalBuffer = canvas.toBuffer();
     fs.writeFileSync(outPath, finalBuffer);
@@ -144,7 +144,7 @@ module.exports.run = async function({ api, event, Users }) {
 ━━━━━━━━━━━━━━━━━━
 ${groupRules}
 ━━━━━━━━━━━━━━━━━━
-👑 Bot Owner : Saiful Islam 💻`,
+👑 Bot Owner :  𝐌𝐝 𝐇𝐚𝐦𝐢𝐦 💻`,
         mentions: [
           { tag: `@${userName}`, id: userID },
           { tag: `@${adderName}`, id: adderID }
