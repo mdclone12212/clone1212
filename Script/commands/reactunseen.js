@@ -1,67 +1,95 @@
-const fs = require("fs");
-const configPath = __dirname + "/reactUnseen.json";
 
-// Config create if not exists
-if (!fs.existsSync(configPath)) {
-  fs.writeFileSync(configPath, JSON.stringify({ enabled: true }, null, 2));
+const fs = require("fs");
+const file = __dirname + "/reactUnseen.json";
+
+// Default config create if not exist
+if (!fs.existsSync(file)) {
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ enabled: true, emojis: ["❤️", "😂", "😡"] }, null, 2)
+  );
 }
 
 module.exports.config = {
   name: "reactunseen",
-  version: "1.0.0",
+  version: "3.0.0",
   author: "MD HAMIM",
   role: 1,
-  description: "Auto unseen bot message when someone reacts",
+  description: "Auto unseen bot message on selected emoji reaction (Messenger)",
   countDown: 0
 };
 
-// যখন বট লোড হবে
-module.exports.onLoad = () => {
-  console.log("✅ React → Unseen system loaded (By MD HAMIM)");
-};
-
-// রিঅ্যাকশন ধরবে
+// When someone reacts on bot message
 module.exports.handleEvent = async function ({ event, api }) {
-  const settings = JSON.parse(fs.readFileSync(configPath));
-  if (!settings.enabled) return;
+  const data = JSON.parse(fs.readFileSync(file));
+  if (!data.enabled) return;
   if (event.type !== "message_reaction") return;
 
   try {
-    const { messageID, threadID, userID } = event;
-    if (!messageID || !threadID) return;
-
-    const msgInfo = await api.getMessageInfo(threadID, messageID);
+    const { threadID, messageID, reaction, userID } = event;
     const botID = api.getCurrentUserID();
 
-    // শুধু তখন কাজ করবে যখন রিঅ্যাকশন বটের পাঠানো মেসেজে দেওয়া হয়
-    if (msgInfo.messageSender && msgInfo.messageSender.userID == botID) {
+    // Fetch info about reacted message
+    const msgInfo = await api.getMessageInfo(threadID, messageID);
+
+    // যদি রিঅ্যাক্ট করা মেসেজ বট পাঠায়, এবং নির্দিষ্ট ইমোজি মিলে যায়
+    if (
+      msgInfo.messageSender &&
+      msgInfo.messageSender.userID == botID &&
+      data.emojis.includes(reaction)
+    ) {
+      // Unseen/mark unread
       await api.markAsUnread(threadID);
-      console.log(`💤 Message marked unseen (react by ${userID})`);
+      console.log(`💤 Unseen triggered (Emoji: ${reaction} by ${userID})`);
     }
   } catch (err) {
-    console.log("❌ ReactUnseen error:", err);
+    console.log("❌ ReactUnseen Error:", err);
   }
 };
 
-// কমান্ড সিস্টেম (on/off)
+// Command system
 module.exports.run = async function ({ event, args, api }) {
-  const settings = JSON.parse(fs.readFileSync(configPath));
+  const data = JSON.parse(fs.readFileSync(file));
+  const option = (args[0] || "").toLowerCase();
+  const emoji = args[1];
 
-  if (args[0] === "on") {
-    settings.enabled = true;
-    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
-    return api.sendMessage("✅ React → Unseen system ACTIVATED!", event.threadID, event.messageID);
+  switch (option) {
+    case "on":
+      data.enabled = true;
+      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      return api.sendMessage("✅ React→Unseen system ACTIVATED!", event.threadID);
+
+    case "off":
+      data.enabled = false;
+      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      return api.sendMessage("❌ React→Unseen system DEACTIVATED!", event.threadID);
+
+    case "add":
+      if (!emoji) return api.sendMessage("⚠️ Example: reactunseen add 😍", event.threadID);
+      if (data.emojis.includes(emoji)) return api.sendMessage("⚠️ এই emoji আগেই যোগ করা আছে!", event.threadID);
+      data.emojis.push(emoji);
+      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      return api.sendMessage(`✅ Emoji ${emoji} সফলভাবে যোগ হলো!`, event.threadID);
+
+    case "remove":
+      if (!emoji) return api.sendMessage("⚠️ Example: reactunseen remove 😍", event.threadID);
+      if (!data.emojis.includes(emoji)) return api.sendMessage("⚠️ এই emoji তালিকায় নেই!", event.threadID);
+      data.emojis = data.emojis.filter((e) => e !== emoji);
+      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      return api.sendMessage(`❌ Emoji ${emoji} মুছে ফেলা হলো!`, event.threadID);
+
+    case "list":
+      return api.sendMessage(
+        `📋 বর্তমান Emoji তালিকা:\n${data.emojis.join(" ")}\n\n🔘 System: ${data.enabled ? "ON ✅" : "OFF ❌"}\n\nUse:\nreactunseen add 😍\nreactunseen remove 😍\nreactunseen on/off`,
+        event.threadID
+      );
+
+    default:
+      return api.sendMessage(
+        `⚙️ ReactUnseen (By MD HAMIM)\nStatus: ${data.enabled ? "🟢 ON" : "🔴 OFF"}\nবর্তমান Emoji: ${data.emojis.join(
+          " "
+        )}\n\nCommands:\n• reactunseen on/off\n• reactunseen add 😍\n• reactunseen remove 😍\n• reactunseen list`,
+        event.threadID
+      );
   }
-
-  if (args[0] === "off") {
-    settings.enabled = false;
-    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2));
-    return api.sendMessage("❌ React → Unseen system DEACTIVATED!", event.threadID, event.messageID);
-  }
-
-  return api.sendMessage(
-    `🔘 React → Unseen is now: ${settings.enabled ? "ON ✅" : "OFF ❌"}\nUse: reactunseen on/off`,
-    event.threadID,
-    event.messageID
-  );
 };
