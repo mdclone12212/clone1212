@@ -1,159 +1,77 @@
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-const WebSocket = require('ws');
-const FormData = require('form-data');
-const ffmpeg = require('fluent-ffmpeg');
-const tmp = require('tmp');
 
-// ====================== USER-CONFIG ======================
-const MIRAI_WS = 'ws://127.0.0.1:8080';
-const MIRAI_HTTP = 'http://127.0.0.1:8080';
-const AUTH_KEY = 'demo_auth_key_please_replace';
-const DEMO_API_URL = 'https://api.demo-animate.ai/generate';
-const DEMO_API_KEY = 'demo_api_key';
-const COMMAND_PREFIX = 'animated ';
-const OUT_WIDTH = 480;
-const OUT_HEIGHT = 480;
-const VIDEO_DURATION = 3; // seconds
-// ==========================================================
+import os
+import random
+import string
+import requests
+from mirai import Mirai, MessageChain, Image, Bot
 
-function log(...args){console.log(new Date().toISOString(), ...args);}
+# ---------------- CONFIG ----------------
+BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+BOT_HOST = "http://localhost:8080"
+BOT_QQ = 123456789  # Replace with your bot QQ
+AI_API_ENDPOINT = "https://your-ai-video-api.com/generate"  # Replace with actual AI video API
+AI_API_KEY = "YOUR_AI_API_KEY_HERE"
 
-async function downloadToFile(url, outPath){
-  const writer = fs.createWriteStream(outPath);
-  const res = await axios({ url, method: 'GET', responseType: 'stream', timeout: 30000 });
-  res.data.pipe(writer);
-  return new Promise((resolve, reject)=>{
-    writer.on('finish',()=>resolve(outPath));
-    writer.on('error',reject);
-  });
-}
+bot = Mirai(
+    host=BOT_HOST,
+    auth_key=BOT_TOKEN,
+    qq=BOT_QQ
+)
 
-async function postToDemoApi(imagePath, actionText){
-  const form = new FormData();
-  form.append('file', fs.createReadStream(imagePath));
-  form.append('action', actionText);
-  form.append('duration', String(VIDEO_DURATION));
-  const headers = Object.assign({ 'x-api-key': DEMO_API_KEY }, form.getHeaders());
-  try{
-    const res = await axios.post(DEMO_API_URL, form, { headers, timeout:120000 });
-    return res.data;
-  }catch(err){
-    log('Demo API call failed:', err?.response?.data || err.message || err);
-    throw err;
-  }
-}
+# ------------- Helper Functions -------------
+def generate_ai_video(image_url, text):
+    """
+    Calls AI video API with image + text input, returns video file path
+    """
+    payload = {
+        "image_url": image_url,
+        "text": text,
+        "voice": "default",
+        "style": "realistic"
+    }
+    headers = {"Authorization": f"Bearer {AI_API_KEY}"}
+    try:
+        response = requests.post(AI_API_ENDPOINT, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        video_url = data.get("video_url")
+        if not video_url:
+            print("No video returned by API")
+            return None
+        video_path = f"./temp_video_{''.join(random.choices(string.ascii_letters, k=6))}.mp4"
+        video_content = requests.get(video_url).content
+        with open(video_path, "wb") as f:
+            f.write(video_content)
+        return video_path
+    except Exception as e:
+        print("Error generating AI video:", e)
+        return None
 
-async function saveBase64ToFile(base64str, outPath){
-  const buf = Buffer.from(base64str, 'base64');
-  await fs.promises.writeFile(outPath, buf);
-  return outPath;
-}
+# ------------- Bot Event Handler -------------
+@bot.on_message
+async def handle_message(bot: Bot, msg: MessageChain, sender):
+    # Detect images in the message
+    images = [seg.url for seg in msg if isinstance(seg, Image)]
+    if not images:
+        return  # No image, ignore
 
-async function uploadFileToMirai(filePath){
-  const url = MIRAI_HTTP.replace(/\/$/,'')+'/uploadFile';
-  const form = new FormData();
-  form.append('file', fs.createReadStream(filePath));
-  const headers = form.getHeaders();
-  if(AUTH_KEY) headers['Authorization'] = AUTH_KEY;
-  try{
-    const res = await axios.post(url, form, { headers, timeout:120000 });
-    return res.data;
-  }catch(err){
-    log('uploadFileToMirai error:', err?.response?.data || err.message || err);
-    throw err;
-  }
-}
+    # Detect 'animated' command and extract text
+    user_text = ""
+    for seg in msg:
+        if hasattr(seg, "text") and "animated" in seg.text.lower():
+            user_text = seg.text.lower().replace("animated", "").strip()
+    if not user_text:
+        user_text = "Hello!"  # default text
 
-async function sendMiraiMessage(target, isGroup, messageChain){
-  const endpoint = isGroup ? '/sendGroupMessage' : '/sendFriendMessage';
-  const url = MIRAI_HTTP.replace(/\/$/,'')+endpoint;
-  const headers = {'Content-Type':'application/json'};
-  if(AUTH_KEY) headers['Authorization']=AUTH_KEY;
-  const body = Object.assign({}, {target:Number(target), messageChain});
-  try{
-    const res = await axios.post(url, body, {headers});
-    return res.data;
-  }catch(err){
-    log('sendMiraiMessage error:', err?.response?.data || err.message || err);
-    throw err;
-  }
-}
+    if images:
+        video_file = generate_ai_video(images[0], user_text)
+        if video_file:
+            await bot.send(sender, MessageChain().append(video_file))
+            os.remove(video_file)
+        else:
+            await bot.send(sender, MessageChain().append("Video generation failed!"))
 
-async function createLoopVideoFromImage(imagePath, outVideoPath){
-  return new Promise((resolve,reject)=>{
-    ffmpeg(imagePath)
-      .loop(VIDEO_DURATION)
-      .outputOptions(['-vf', `scale=${OUT_WIDTH}:${OUT_HEIGHT}`, '-pix_fmt yuv420p'])
-      .on('end',()=>resolve(outVideoPath))
-      .on('error',(err)=>reject(err))
-      .save(outVideoPath);
-  });
-}
-
-function extractActionFromText(text){
-  if(!text) return null;
-  const t=text.trim();
-  if(t.toLowerCase().startsWith(COMMAND_PREFIX)) return t.slice(COMMAND_PREFIX.length).trim();
-  return null;
-}
-
-async function handleCommandImage(event, imagePartUrl, actionText){
-  log('handling command image',actionText);
-  const tmpDir = tmp.dirSync({unsafeCleanup:true});
-  try{
-    const imgPath = path.join(tmpDir.name,'input_image');
-    const ext = path.extname(new URL(imagePartUrl).pathname) || '.jpg';
-    const imgFile = imgPath+ext;
-    await downloadToFile(imagePartUrl,imgFile);
-
-    let apiRes = null;
-    try{ apiRes = await postToDemoApi(imgFile,actionText); }catch(err){ log('Demo API failed — fallback local video'); }
-
-    let finalVideoPath = path.join(tmpDir.name,'out.mp4');
-    if(apiRes && apiRes.video_base64) await saveBase64ToFile(apiRes.video_base64,finalVideoPath);
-    else if(apiRes && apiRes.video_url) await downloadToFile(apiRes.video_url,finalVideoPath);
-    else await createLoopVideoFromImage(imgFile,finalVideoPath);
-
-    const uploadInfo = await uploadFileToMirai(finalVideoPath);
-    let messageChain = [];
-    if(uploadInfo && uploadInfo.url) messageChain.push({type:'Plain',text:'[Animated video] '+uploadInfo.url});
-    else messageChain.push({type:'Plain',text:'[Animated video generated — check your mirai upload response]'});
-
-    const isGroup = event.type && /group/i.test(event.type);
-    const target = isGroup ? event.sender.group?.id || event.receiver || event.target : event.sender?.id || event.receiver || event.target;
-    await sendMiraiMessage(target,isGroup,messageChain);
-    log('sent message back to chat (demo).');
-  }finally{ if(!process.env.DEBUG_KEEP_FILES) tmpDir.removeCallback(); }
-}
-
-function startWs(){
-  log('Connecting to Mirai WS at', MIRAI_WS);
-  const ws = new WebSocket(MIRAI_WS);
-  ws.on('open',()=>log('Mirai WS connected.'));
-  ws.on('error',(err)=>log('Mirai WS error', err?.message || err));
-  ws.on('message', async (raw)=>{
-    try{
-      const data=JSON.parse(raw.toString());
-      if(!data||!data.messageChain) return;
-      const plainParts=data.messageChain.filter(p=>p.type==='Plain');
-      const text=plainParts.map(p=>p.text).join('');
-      const action=extractActionFromText(text);
-      if(!action) return;
-      const imageParts=data.messageChain.filter(p=>p.type==='Image');
-      let imageUrl=null;
-      if(imageParts.length>0) imageUrl=imageParts[0].url||imageParts[0].imageId||imageParts[0].path||null;
-      if(!imageUrl && data.quote && data.quote.origin){ log('Quoted image — demo does not fetch automatically.'); return; }
-      if(!imageUrl){ log('No image found — ignoring.'); return; }
-      if(!/^https?:\/\//i.test(imageUrl) && MIRAI_HTTP) imageUrl=MIRAI_HTTP.replace(/\/$/,'')+'/file?type=image&id='+encodeURIComponent(imageUrl);
-      await handleCommandImage(data,imageUrl,action);
-    }catch(err){ log('WS message handler error:',err?.message||err); }
-  });
-  ws.on('close',()=>{ log('Mirai WS closed — reconnecting in 5s'); setTimeout(startWs,5000); });
-}
-
-(function main(){
-  log('animate.js demo starting — connecting to Mirai...');
-  try{ startWs(); }catch(err){ log('Fatal error starting script:', err?.message||err); process.exit(1); }
-})();
+# ------------- Run Bot -------------
+if __name__ == "__main__":
+    print("Starting MD HAMIM AI Video Bot...")
+    bot.run()
