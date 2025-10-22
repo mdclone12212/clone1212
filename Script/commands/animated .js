@@ -1,71 +1,68 @@
 const fs = require("fs");
 const { exec } = require("child_process");
-const axios = require("axios");
+const path = require("path");
 
 module.exports.config = {
   name: "animated",
-  version: "2.0.0",
+  version: "3.0.0",
   hasPermssion: 0,
-  credits: "MD HAMIM",
-  description: "Advanced: Multiple images slideshow video with optional text & music (API free)",
-  commandCategory: "Fun",
-  usages: "animated <duration_sec_per_image (5-20)> [optional text] [optional music_url]",
+  credits: "MD HAMIM (Final Advanced Edition)",
+  description: "Offline Image to Animated Video (zoom, fade, text, bg music, compatible)",
+  commandCategory: "fun",
+  usages: "reply image + animated [text]",
   cooldowns: 5
 };
 
-module.exports.run = async ({ api, event, args }) => {
+module.exports.run = async function({ api, event, args }) {
   try {
-    if (!event.messageReply || !event.messageReply.attachments) {
-      return api.sendMessage("Pls reply to one or multiple images to create a video!", event.threadID, event.messageID);
+    if (!event.messageReply || !event.messageReply.attachments || event.messageReply.attachments.length === 0)
+      return api.sendMessage("🖼️ প্রথমে একটা image এর reply দিতে হবে!", event.threadID, event.messageID);
+
+    const imgUrl = event.messageReply.attachments[0].url;
+    const msgText = args.join(" ") || "Animated Video";
+
+    const cacheDir = path.join(__dirname, "/cache");
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
+    const imgPath = path.join(cacheDir, `${Date.now()}.jpg`);
+    const videoPath = imgPath.replace(".jpg", ".mp4");
+    const bgMusic = path.join(cacheDir, "bg.mp3");
+
+    // 🖼️ Download image
+    const download = require("image-downloader");
+    await download.image({ url: imgUrl, dest: imgPath });
+
+    // 🎵 Background music optional (if not exists, create dummy)
+    if (!fs.existsSync(bgMusic)) {
+      fs.writeFileSync(bgMusic, Buffer.alloc(1)); // create silent audio file
     }
 
-    // Duration per image (default 5 sec, limit 5-20)
-    let duration = parseInt(args[0]) || 5;
-    if (duration < 5) duration = 5;
-    if (duration > 20) duration = 20;
+    // 🎬 Random duration (5–20 sec)
+    const duration = Math.floor(Math.random() * 16) + 5;
 
-    const overlayText = args.slice(1).join(" ") || "";
-    const attachments = event.messageReply.attachments;
-    const downloadedImages = [];
+    // 🌀 ffmpeg command (optimized for all players)
+    const cmd = `ffmpeg -loop 1 -i "${imgPath}" -i "${bgMusic}" -filter_complex "[0:v]zoompan=z='min(zoom+0.002,1.3)':s=720x720,fade=t=in:st=0:d=1,fade=t=out:st=${duration - 1}:d=1,drawtext=text='${msgText}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=h-80:shadowcolor=black:shadowx=2:shadowy=2[v]" -map "[v]" -map 1:a -c:v libx264 -c:a aac -movflags +faststart -preset veryfast -shortest -t ${duration} -pix_fmt yuv420p -y "${videoPath}"`;
 
-    // Download all images locally
-    for (let i = 0; i < attachments.length; i++) {
-      const url = attachments[i].url;
-      const path = `/tmp/input_${i}.jpg`;
-      const writer = fs.createWriteStream(path);
-      const response = await axios.get(url, { responseType: "stream" });
-      response.data.pipe(writer);
-      await new Promise(resolve => writer.on("finish", resolve));
-      downloadedImages.push(path);
-    }
+    exec(cmd, async (err, stdout, stderr) => {
+      if (err) {
+        console.log("❌ ffmpeg error:", err);
+        console.log(stderr);
+        return api.sendMessage("⚠️ ভিডিও তৈরি করতে সমস্যা হয়েছে!", event.threadID, event.messageID);
+      }
 
-    // Create ffmpeg input list
-    const listFile = "/tmp/images.txt";
-    const fileContent = downloadedImages.map(img => `file '${img}'\nduration ${duration}`).join("\n");
-    fs.writeFileSync(listFile, fileContent);
-
-    const videoPath = "/tmp/output.mp4";
-
-    // ffmpeg command: slideshow with optional text overlay
-    let ffmpegCmd = `ffmpeg -f concat -safe 0 -i ${listFile} -vsync vfr -pix_fmt yuv420p ${videoPath}`;
-    if (overlayText) {
-      ffmpegCmd = `ffmpeg -f concat -safe 0 -i ${listFile} -vf "drawtext=text='${overlayText}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=(h-text_h)/2" -vsync vfr -pix_fmt yuv420p ${videoPath}`;
-    }
-
-    exec(ffmpegCmd, (error) => {
-      if (error) return api.sendMessage("Video convert korte problem hoise!", event.threadID, event.messageID);
-
+      // ✅ Send final video
       api.sendMessage({
-        body: `✅ Advanced Video ready! Duration per image: ${duration} sec`,
+        body: `✨ তোমার Advanced Animated ভিডিও (${duration}s) তৈরি হয়েছে!`,
         attachment: fs.createReadStream(videoPath)
       }, event.threadID, () => {
-        downloadedImages.forEach(img => fs.unlinkSync(img));
-        fs.unlinkSync(listFile);
+        // clean up cache
+        fs.unlinkSync(imgPath);
         fs.unlinkSync(videoPath);
-      }, event.messageID);
+      });
     });
 
-  } catch (err) {
-    return api.sendMessage("Kichu error hoise! Please try again.", event.threadID, event.messageID);
+  } catch (e) {
+    console.log(e);
+    api.sendMessage("⚠️ কিছু একটা সমস্যা হয়েছে!", event.threadID, event.messageID);
   }
 };
