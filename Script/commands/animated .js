@@ -1,5 +1,4 @@
-// File: animated.js
-// Credits: MD HAMIM
+
 const fs = require("fs");
 const { createCanvas } = require("canvas");
 const ffmpeg = require("fluent-ffmpeg");
