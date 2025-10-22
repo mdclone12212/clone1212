@@ -1,68 +1,70 @@
+// File: animated.js
+// Credits: MD HAMIM
 const fs = require("fs");
-const { exec } = require("child_process");
-const path = require("path");
+const { createCanvas } = require("canvas");
+const ffmpeg = require("fluent-ffmpeg");
 
-module.exports.config = {
-  name: "animated",
-  version: "3.0.0",
-  hasPermssion: 0,
-  credits: "MD HAMIM (Final Advanced Edition)",
-  description: "Offline Image to Animated Video (zoom, fade, text, bg music, compatible)",
-  commandCategory: "fun",
-  usages: "reply image + animated [text]",
-  cooldowns: 5
-};
+module.exports = {
+    name: "animated",
+    description: "নিজের টেক্সট দিয়ে অ্যানিমেটেড ভিডিও বানান (100% API ফ্রি)",
+    async execute(bot, message, args) {
+        try {
+            if (!args.length) {
+                return message.reply("ভিডিওতে দেখানোর জন্য টেক্সট লিখুন!");
+            }
 
-module.exports.run = async function({ api, event, args }) {
-  try {
-    if (!event.messageReply || !event.messageReply.attachments || event.messageReply.attachments.length === 0)
-      return api.sendMessage("🖼️ প্রথমে একটা image এর reply দিতে হবে!", event.threadID, event.messageID);
+            const text = args.join(" ");
+            const width = 720;
+            const height = 480;
+            const tempImage = `temp_${Date.now()}.png`;
+            const outputVideo = `animated_${Date.now()}.mp4`;
 
-    const imgUrl = event.messageReply.attachments[0].url;
-    const msgText = args.join(" ") || "Animated Video";
+            // Canvas তৈরি
+            const canvas = createCanvas(width, height);
+            const ctx = canvas.getContext("2d");
 
-    const cacheDir = path.join(__dirname, "/cache");
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+            // ব্যাকগ্রাউন্ড
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0, 0, width, height);
 
-    const imgPath = path.join(cacheDir, `${Date.now()}.jpg`);
-    const videoPath = imgPath.replace(".jpg", ".mp4");
-    const bgMusic = path.join(cacheDir, "bg.mp3");
+            // ইউজারের টেক্সট
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 40px Sans";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, width / 2, height / 2);
 
-    // 🖼️ Download image
-    const download = require("image-downloader");
-    await download.image({ url: imgUrl, dest: imgPath });
+            // ক্রেডিট লেখা MD HAMIM
+            ctx.font = "italic 20px Sans";
+            ctx.fillStyle = "#ffdd00";
+            ctx.fillText("MD HAMIM", width - 100, height - 30);
 
-    // 🎵 Background music optional (if not exists, create dummy)
-    if (!fs.existsSync(bgMusic)) {
-      fs.writeFileSync(bgMusic, Buffer.alloc(1)); // create silent audio file
+            // ছবি ফাইল সেভ করা
+            const buffer = canvas.toBuffer("image/png");
+            fs.writeFileSync(tempImage, buffer);
+
+            // ffmpeg দিয়ে ৫ সেকেন্ড ভিডিও তৈরি করা
+            ffmpeg(tempImage)
+                .loop(5)
+                .outputOptions([
+                    "-c:v libx264",
+                    "-t 5",
+                    "-pix_fmt yuv420p"
+                ])
+                .save(outputVideo)
+                .on("end", async () => {
+                    await message.reply({ files: [outputVideo] });
+                    fs.unlinkSync(tempImage);
+                    fs.unlinkSync(outputVideo);
+                })
+                .on("error", (err) => {
+                    console.error(err);
+                    message.reply("ভিডিও বানাতে সমস্যা হয়েছে!");
+                });
+
+        } catch (err) {
+            console.error(err);
+            message.reply("কিছু ভুল হয়েছে!");
+        }
     }
-
-    // 🎬 Random duration (5–20 sec)
-    const duration = Math.floor(Math.random() * 16) + 5;
-
-    // 🌀 ffmpeg command (optimized for all players)
-    const cmd = `ffmpeg -loop 1 -i "${imgPath}" -i "${bgMusic}" -filter_complex "[0:v]zoompan=z='min(zoom+0.002,1.3)':s=720x720,fade=t=in:st=0:d=1,fade=t=out:st=${duration - 1}:d=1,drawtext=text='${msgText}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=h-80:shadowcolor=black:shadowx=2:shadowy=2[v]" -map "[v]" -map 1:a -c:v libx264 -c:a aac -movflags +faststart -preset veryfast -shortest -t ${duration} -pix_fmt yuv420p -y "${videoPath}"`;
-
-    exec(cmd, async (err, stdout, stderr) => {
-      if (err) {
-        console.log("❌ ffmpeg error:", err);
-        console.log(stderr);
-        return api.sendMessage("⚠️ ভিডিও তৈরি করতে সমস্যা হয়েছে!", event.threadID, event.messageID);
-      }
-
-      // ✅ Send final video
-      api.sendMessage({
-        body: `✨ তোমার Advanced Animated ভিডিও (${duration}s) তৈরি হয়েছে!`,
-        attachment: fs.createReadStream(videoPath)
-      }, event.threadID, () => {
-        // clean up cache
-        fs.unlinkSync(imgPath);
-        fs.unlinkSync(videoPath);
-      });
-    });
-
-  } catch (e) {
-    console.log(e);
-    api.sendMessage("⚠️ কিছু একটা সমস্যা হয়েছে!", event.threadID, event.messageID);
-  }
 };
